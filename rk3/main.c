@@ -4,7 +4,7 @@
 
 int main(void)
 {
-    names_t names = { NULL, 0 };
+    names_t names;
 
     if (read_names("in.txt", &names))
     {
