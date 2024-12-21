@@ -15,4 +15,4 @@ tools.o: tools.c tools.h
 	$(CC) $(CFLAGS) -c tools.c
 
 clean:
-	rm -f *.o main
+	rm -f *.o app.exe
