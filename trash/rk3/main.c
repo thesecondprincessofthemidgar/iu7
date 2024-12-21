@@ -1,43 +1,24 @@
+#include <stdio.h>
+#include <stdlib.h>
 #include "tools.h"
 
-int main(int argc, char **argv)
+int main(void)
 {
-    if (argc != 3)
+    names_t names = { NULL, 0 };
+
+    if (read_names("in.txt", &names))
     {
-        fprintf(stderr, "Использование: %s <файл с точками> <файл с фигурами>\n", argv[0]);
         return 1;
     }
 
-    point_t *points = NULL;
-    size_t points_size = 0;
-    int error_code;
+    sort_names(&names);
 
-    // Читаем точки
-    if ((error_code = read_points(argv[1], &points, &points_size)) != 0)
-        return error_code;
-
-    // Сортируем точки
-    sort_points(points, points_size);
-
-    figure_t *figures = NULL;
-    size_t figures_size = 0;
-
-    // Читаем фигуры
-    if ((error_code = read_figures(argv[2], &figures, &figures_size)) != 0)
+    if (write_names("out.txt", &names))
     {
-        free(points);
-        return error_code;
+        free_names(&names);
+        return 2;
     }
 
-    // Проставляем бинарные признаки
-    check_binary_features(figures, figures_size, points, points_size);
-
-    // Печатаем результаты
-    print_all_figures(figures, figures_size);
-
-    // Освобождаем память
-    free_figures(figures, figures_size);
-    free(points);
-
+    free_names(&names);
     return 0;
 }

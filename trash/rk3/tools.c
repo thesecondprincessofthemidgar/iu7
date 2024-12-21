@@ -1,204 +1,115 @@
-#define _GNU_SOURCE
+#ifdef __STDC_ALLOC_LIB__
+#define __STDC_WANT_LIB_EXT2__ 1
+#else
+#define _POSIX_C_SOURCE 200809L
+#endif
 
 #include "tools.h"
 #include <string.h>
 
-#define INITIAL_CAPACITY 10
-
-// Проверка наличия точки в массиве
-static int is_in(point_t p, point_t *points, size_t size)
+static int compare_names(const void *a, const void *b)
 {
-    for (size_t i = 0; i < size; i++)
-    {
-        if (p.x == points[i].x && p.y == points[i].y)
-            return 1;
-    }
-    return 0;
+    const name_t *aa = (const name_t *)a;
+    const name_t *bb = (const name_t *)b;
+    return strcmp(aa->name, bb->name);
 }
 
-// Чтение точек из файла с уникальностью
-int read_points(const char *fname, point_t **points, size_t *size)
+static int find_name(const names_t *names, const char *name)
 {
-    *points = NULL;
-    *size = 0;
-    size_t capacity = 0;
+    for (size_t i = 0; i < names->size; i++)
+        if (strcmp(names->array[i].name, name) == 0)
+            return i;
 
-    FILE *f = fopen(fname, "rt");
-    if (!f)
+    return -1;
+}
+
+static int add_name(names_t *names, char *buf)
+{
+    int pos = find_name(names, buf);
+    if (pos >= 0)
     {
-        fprintf(stderr, "Cannot open points file: %s\n", fname);
+        names->array[pos].repeats_count++;
+        return 0;
+    }
+
+    name_t *tmp = realloc(names->array, (names->size + 1) * sizeof(name_t));
+    if (!tmp)
+    {
         return 1;
     }
 
-    point_t new_point;
-    while (fscanf(f, "%d %d", &new_point.x, &new_point.y) == 2)
-    {
-        if (!is_in(new_point, *points, *size))
-        {
-            // Добавляем точку
-            if (*size == capacity)
-            {
-                capacity = (capacity == 0) ? INITIAL_CAPACITY : capacity * 2;
-                point_t *tmp = realloc(*points, capacity * sizeof(point_t));
-                if (!tmp)
-                {
-                    fclose(f);
-                    free(*points);
-                    fprintf(stderr, "Memory allocation error\n");
-                    return 2;
-                }
-                *points = tmp;
-            }
-            (*points)[*size] = new_point;
-            (*size)++;
-        }
-    }
+    names->array = tmp;
 
-    fclose(f);
+    names->array[names->size].name = strdup(buf);
+    if (!names->array[names->size].name)
+        return 1;
+
+    names->array[names->size].repeats_count = 1;
+    names->size++;
+    
     return 0;
 }
 
-// Компаратор для qsort: сначала по x, при равенстве по y
-static int compare_points(const void *a, const void *b)
-{
-    const point_t *p1 = (const point_t *)a;
-    const point_t *p2 = (const point_t *)b;
-    if (p1->x < p2->x)
-        return -1;
-    else if (p1->x > p2->x)
-        return 1;
-    else
-    {
-        if (p1->y < p2->y)
-            return -1;
-        else if (p1->y > p2->y)
-            return 1;
-        else
-            return 0;
-    }
-}
-
-// Сортировка точек
-void sort_points(point_t *base, size_t size)
-{
-    qsort(base, size, sizeof(point_t), compare_points);
-}
-
-// Чтение фигур
-// Формат: каждая строка — одна фигура. В строке идут координаты точек подряд.
-// Например: "1 2 3 4 5 6" => (1,2), (3,4), (5,6)
-int read_figures(const char *fname, figure_t **figures, size_t *size)
+int read_names(char *fname, names_t *names)
 {
     FILE *f = fopen(fname, "r");
-    if (!f) return 1;
+    if (!f)
+        return 1;
 
-    // Подсчёт строк - каждая строка = одна фигура
-    char line[MAX_LINE_SIZE];
-    size_t lines = 0;
-    while (fgets(line, MAX_LINE_SIZE, f) != NULL)
-        lines++;
-    rewind(f);
+    names->array = NULL;
+    names->size = 0;
 
-    figure_t *fgrs = malloc(sizeof(figure_t) * lines);
-    if (!fgrs)
+    char *line = NULL;
+    size_t buffer_size = 0;
+    ssize_t len;
+
+    while ((len = getline(&line, &buffer_size, f)) != -1)
     {
-        fclose(f);
-        return 2;
-    }
+        if (len > 0 && line[len - 1] == '\n')
+            line[len - 1] = '\0';
 
-    for (size_t i = 0; i < lines; i++)
-    {
-        if (!fgets(line, MAX_LINE_SIZE, f))
+        if (add_name(names, line) != 0)
         {
-            // Если почему-то не считали строку, выходим
-            free(fgrs);
-            return 3;
-        }
-
-        // Подсчитаем количество чисел в строке
-        int tmp;
-        int count = 0;
-        char *p = line;
-        // Используем временный указатель для sscanf
-        while (sscanf(p, "%d", &tmp) == 1)
-        {
-            count++;
-            while (*p && (*p == ' ' || *p == '\t' || (*p >= '0' && *p <= '9') || *p == '-' || *p == '+'))
-                p++;
-        }
-
-        // count - общее количество чисел
-        int points_count = count / 2;
-        fgrs[i].size = points_count;
-        fgrs[i].points = malloc(points_count * sizeof(point_t));
-        fgrs[i].binary_features = malloc(points_count * sizeof(int));
-
-        // Теперь снова пройдем по строке и запишем числа
-        p = line;
-        for (int j = 0; j < points_count; j++)
-        {
-            int x, y;
-            // Считываем x
-            while (*p && (*p == ' ' || *p == '\t')) p++;
-            sscanf(p, "%d", &x);
-            while (*p && (*p == '-' || *p == '+' || (*p >= '0' && *p <= '9'))) p++;
-            
-            // Считываем y
-            while (*p && (*p == ' ' || *p == '\t')) p++;
-            sscanf(p, "%d", &y);
-            while (*p && (*p == '-' || *p == '+' || (*p >= '0' && *p <= '9'))) p++;
-
-            fgrs[i].points[j].x = x;
-            fgrs[i].points[j].y = y;
+            fclose(f);
+            free(line);
+            return -1;
         }
     }
 
     fclose(f);
-    *figures = fgrs;
-    *size = lines;
+    free(line);
+
     return 0;
 }
 
-// Проставляем бинарные признаки
-void check_binary_features(figure_t *figures, size_t fgrs_size, point_t *points, size_t points_size)
+void sort_names(names_t *names)
 {
-    for (size_t i = 0; i < fgrs_size; i++)
-    {
-        for (size_t j = 0; j < figures[i].size; j++)
-        {
-            if (is_in(figures[i].points[j], points, points_size))
-                figures[i].binary_features[j] = 1;
-            else
-                figures[i].binary_features[j] = 0;
-        }
-    }
+    qsort(names->array, names->size, sizeof(name_t), compare_names);
 }
 
-static void print_figure_features(figure_t figure)
+int write_names(char *fname, names_t *names)
 {
-    printf("( ");
-    for (size_t i = 0; i < figure.size; i++)
-        printf("%d ", figure.binary_features[i]);
-    printf(")\n");
+    FILE *f = fopen(fname, "w");
+    if (!f)
+        return 1;
+
+    for (size_t i = 0; i < names->size; i++)
+        fprintf(f, "%s: %d\n", names->array[i].name, names->array[i].repeats_count);
+
+    fclose(f);
+    
+    return 0;
 }
 
-void print_all_figures(figure_t *figures, size_t size)
+void free_names(names_t *names)
 {
-    for (size_t i = 0; i < size; i++)
-    {
-        printf("%zu - ", i + 1);
-        print_figure_features(figures[i]);
-    }
-}
+    if (!names || !names->array)
+        return;
 
-// Освобождение памяти фигур
-void free_figures(figure_t *figures, size_t size)
-{
-    if (!figures) return;
-    for (size_t i = 0; i < size; i++)
-    {
-        free(figures[i].points);
-        free(figures[i].binary_features);
-    }
-    free(figures);
+    for (size_t i = 0; i < names->size; i++)
+        free(names->array[i].name);
+
+    free(names->array);
+    names->array = NULL;
+    names->size  = 0;
 }
