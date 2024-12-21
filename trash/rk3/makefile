@@ -1,5 +1,5 @@
-CC     = gcc
-CFLAGS = -std=c11 -Wall -Wextra -g
+CC = gcc
+CFLAGS = -std=c99 -Wall -Wextra -g
 
 .PHONY: all clean
 
